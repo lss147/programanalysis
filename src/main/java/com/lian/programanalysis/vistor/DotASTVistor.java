@@ -1,7 +1,10 @@
 package com.lian.programanalysis.vistor;
 
+import com.lian.programanalysis._enum.LineColor;
 import com.lian.programanalysis.model.DotNode;
 import com.lian.programanalysis.model.DotNodeFac;
+import com.lian.programanalysis.model.GoConnectLine;
+import com.lian.programanalysis.model.GoNode;
 import org.eclipse.jdt.core.dom.*;
 
 import java.io.File;
@@ -13,7 +16,9 @@ import java.util.List;
 import java.util.Set;
 
 public class DotASTVistor extends ASTVisitor {
-    public List<DotNode> nodeList;
+    public List<DotNode> dotnodeList;
+    public List<GoNode> gonodeList;
+    public List<GoConnectLine> goConnectLineList;
     private CompilationUnit root;//把root传进来，方便获取行号
     private int nodeNum;
     private byte[] input;
@@ -29,23 +34,23 @@ public class DotASTVistor extends ASTVisitor {
 @Override
     public boolean visit(MethodDeclaration node){
         Block block = node.getBody();
-        nodeList = new ArrayList<DotNode>();
+        dotnodeList = new ArrayList<DotNode>();
         nodeNum = 0;
         try {
-            makeList(block, nodeList);
+            makeList(block, dotnodeList);
         } catch (UnsupportedEncodingException e1) {
 // TODO Auto-generated catch block
             e1.printStackTrace();
         }
         String methodName = node.getName().toString();
-        if(nodeList.size() > 0){
+        if(dotnodeList.size() > 0){
             DotNode endNode = DotNodeFac.createEndNode();
             endNode.setId(++nodeNum);
-            endNode.addPreId(getMaxId(nodeList));
-            nodeList.add(endNode);//添加结束节点
-            for(DotNode dotNode : nodeList){//将制作流程链表时临时生成的控制语句公共出口节点过滤掉
+            endNode.addPreId(getMaxId(dotnodeList));
+            dotnodeList.add(endNode);//添加结束节点
+            for(DotNode dotNode : dotnodeList){//将制作流程链表时临时生成的控制语句公共出口节点过滤掉
                 if(dotNode.getText() == ""){
-                    for(DotNode dNode : nodeList){
+                    for(DotNode dNode : dotnodeList){
                         if(dNode.getPreIds().contains(dotNode.getId())){
                             dNode.getPreIds().remove((Integer)dotNode.getId());
                             dNode.getPreIds().addAll(dotNode.getPreIds());
@@ -58,10 +63,10 @@ public class DotASTVistor extends ASTVisitor {
                     }
                 }
             }
-            for(DotNode dotNode : nodeList){//将以return语句为来源的边去掉
+            for(DotNode dotNode : dotnodeList){//将以return语句为来源的边去掉
                 if(dotNode.getText().startsWith("return ") ||
                         dotNode.getText().startsWith("return;")){
-                    for(DotNode dNode : nodeList){
+                    for(DotNode dNode : dotnodeList){
                         if(dNode.getPreIds().contains(dotNode.getId())){
                             if(!dNode.getShape().equals("doublecircle")){//从return语句指向结束节点的边例外
                                 dNode.getPreIds().remove((Integer)dotNode.getId());
@@ -74,7 +79,12 @@ public class DotASTVistor extends ASTVisitor {
             if(dotFiles.contains(pathname)){
                 pathname += "_1";//有重载的方法则修改文件名以免覆盖
             }
-            dotFiles.add(pathname);//注释掉写文件
+            dotFiles.add(pathname);
+            combineRecord(dotnodeList);//合并代码块
+            generateGoNode(dotnodeList);//生成gojs节点
+            generateGoConnectLine(dotnodeList);//生成gojs所需要的连线
+
+
 //            try {
 //                if(makedot){
 //                   makeDotFile(pathname);//生成dot文件
@@ -102,8 +112,8 @@ public class DotASTVistor extends ASTVisitor {
                 "</font>>;\n\t\tnode [shape=record,fontname=\"Microsoft YaHei\"];\n",
                 "\n\t\tedge[fontname=\"Microsoft YaHei\"];\n",
                 "node0[shape=circle,label=\"start\",style=\"filled\",fillcolor=green]\n"));
-        combineRecord(nodeList);//合并几个同时出现的record
-        for(DotNode n : this.nodeList){
+        combineRecord(dotnodeList);//合并几个同时出现的record
+        for(DotNode n : this.dotnodeList){
             if(n.getText() != ""){//过滤掉制作执行链表时用于过渡的空节点
                 ps.println(String.format("node%d[label=\"%d:\\n%s\",shape=%s];\n",
                         n.getId(), n.getId(),n.getText(),n.getShape()));
@@ -121,11 +131,11 @@ public class DotASTVistor extends ASTVisitor {
      * @param pathname
      * @throws Exception
      */
-    private void makePng(String pathname)throws Exception {
-        String exec = String.format("dot -Tpng %s.txt -o %s.png", pathname, pathname);
-        Runtime.getRuntime().exec(exec);
-
-    }
+//    private void makePng(String pathname)throws Exception {
+//        String exec = String.format("dot -Tpng %s.txt -o %s.png", pathname, pathname);
+//        Runtime.getRuntime().exec(exec);
+//
+//    }
     /**
      * 将源代码作为标签显示为流程图节点的内容
      * 将源代码中可能出现的dot敏感字符替换（除了双引号和尖括号，不知道还有没有）
@@ -197,6 +207,29 @@ private List<DotNode> combineRecord(List<DotNode> list){
     return list;
 }
 
+    /**
+     * 生成gojs所需要的节点
+     * @param list
+     */
+    private void generateGoNode(List<DotNode> list){
+        gonodeList=new ArrayList<GoNode>();
+        for(DotNode dotNode:list){
+            gonodeList.add(new GoNode(dotNode.getId()+"",dotNode.getShape(),dotNode.getText(),"",""));
+        }
+
+}
+    /**
+     * 生成gojs所需要的连线
+     * @param list
+     */
+    private void generateGoConnectLine(List<DotNode> list) {
+        goConnectLineList = new ArrayList<GoConnectLine>();
+        for (DotNode dotNode : list) {
+            for(int i:dotNode.getPreIds()) {
+                goConnectLineList.add(new GoConnectLine(i+"", dotNode.getId() + "", LineColor.getType( dotNode.getEdgeLbl(i))+"", dotNode.getEdgeLbl(i)));
+            }
+        }
+    }
     /**
      * 生成方法的执行流程链表
      * @throws UnsupportedEncodingException
